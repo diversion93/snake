@@ -10,6 +10,8 @@ A simple, reliable multiplayer Snake game that supports up to 20 players simulta
 - **Larger Canvas**: 1400x800 pixels with smaller 4-6px snake segments
 - **Real-time Leaderboard**: Live player rankings displayed in-game
 - **Simple Authentication**: Just enter a username to join
+- **Mobile Support**: Full touch controls and responsive design for mobile browsers
+- **Cross-Platform**: Works seamlessly on desktop and mobile devices
 
 ## Installation
 
@@ -38,8 +40,16 @@ http://localhost:3000
 
 ## Controls
 
+### Desktop
 - **Arrow Keys** or **A/D**: Turn left/right
+- **Shift**: Sprint (consumes length)
+- **Ctrl**: Highlight your snake
 - Snakes automatically move forward
+
+### Mobile
+- **Swipe left/right** on the canvas to turn
+- **Two-finger touch**: Sprint (consumes length)
+- Touch controls are automatically enabled on mobile devices
 
 ## Setting Up Cloudflare Tunnel
 

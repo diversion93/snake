@@ -12,6 +12,12 @@ let shiftPressed = false; // Track Shift key for sprint
 let lastUpdateTime = Date.now();
 let gameActive = true;
 
+// Mobile touch controls
+let touchStartX = 0;
+let touchStartY = 0;
+let touchActive = false;
+let isMobileDevice = false;
+
 // Login screen
 document.addEventListener('DOMContentLoaded', () => {
     const loginScreen = document.getElementById('loginScreen');
@@ -19,9 +25,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const usernameInput = document.getElementById('usernameInput');
     const joinButton = document.getElementById('joinButton');
     
+    // Detect mobile device
+    isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                     ('ontouchstart' in window) || 
+                     (navigator.maxTouchPoints > 0);
+    
     // Initialize canvas
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
+    
+    // Adjust canvas size for mobile
+    if (isMobileDevice) {
+        const maxWidth = Math.min(window.innerWidth - 40, 800);
+        const maxHeight = Math.min(window.innerHeight - 200, 600);
+        canvasWidth = maxWidth;
+        canvasHeight = maxHeight;
+        
+        // Add mobile control instructions
+        const mobileHint = document.createElement('div');
+        mobileHint.id = 'mobileHint';
+        mobileHint.innerHTML = 'Tap left/right to turn, hold both sides to sprint';
+        mobileHint.style.cssText = 'position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: white; background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 10px; font-size: 14px; z-index: 1000; text-align: center;';
+        document.body.appendChild(mobileHint);
+        
+        // Hide hint after 5 seconds
+        setTimeout(() => {
+            mobileHint.style.opacity = '0';
+            mobileHint.style.transition = 'opacity 1s';
+            setTimeout(() => mobileHint.remove(), 1000);
+        }, 5000);
+    }
     
     // Join game button
     joinButton.addEventListener('click', joinGame);
@@ -180,6 +213,7 @@ function initGame(username) {
 }
 
 function setupControls() {
+    // Keyboard controls
     document.addEventListener('keydown', (e) => {
         keys[e.key] = true;
         // Track Ctrl key (Control for macOS, Control/Ctrl for Windows/Linux)
@@ -205,6 +239,93 @@ function setupControls() {
         }
         e.preventDefault();
     });
+    
+    // Mobile touch controls
+    if (isMobileDevice) {
+        let activeTouches = new Map();
+        
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            
+            for (let i = 0; i < e.touches.length; i++) {
+                const touch = e.touches[i];
+                activeTouches.set(touch.identifier, {
+                    startX: touch.clientX,
+                    startY: touch.clientY,
+                    currentX: touch.clientX,
+                    currentY: touch.clientY
+                });
+            }
+            
+            // Check for sprint (two fingers)
+            if (activeTouches.size >= 2) {
+                shiftPressed = true;
+            }
+        }, { passive: false });
+        
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            for (let i = 0; i < e.touches.length; i++) {
+                const touch = e.touches[i];
+                const touchData = activeTouches.get(touch.identifier);
+                
+                if (touchData && myPlayer) {
+                    touchData.currentX = touch.clientX;
+                    touchData.currentY = touch.clientY;
+                    
+                    // Calculate swipe direction for single touch
+                    if (activeTouches.size === 1) {
+                        const deltaX = touchData.currentX - touchData.startX;
+                        const swipeThreshold = 10;
+                        
+                        if (Math.abs(deltaX) > swipeThreshold) {
+                            if (deltaX > 0) {
+                                keys['ArrowRight'] = true;
+                                keys['ArrowLeft'] = false;
+                            } else {
+                                keys['ArrowLeft'] = true;
+                                keys['ArrowRight'] = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }, { passive: false });
+        
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            
+            // Remove ended touches
+            const remainingTouches = new Set();
+            for (let i = 0; i < e.touches.length; i++) {
+                remainingTouches.add(e.touches[i].identifier);
+            }
+            
+            activeTouches.forEach((value, key) => {
+                if (!remainingTouches.has(key)) {
+                    activeTouches.delete(key);
+                }
+            });
+            
+            // Release controls when no touches
+            if (activeTouches.size === 0) {
+                keys['ArrowLeft'] = false;
+                keys['ArrowRight'] = false;
+                shiftPressed = false;
+            } else if (activeTouches.size < 2) {
+                shiftPressed = false;
+            }
+        }, { passive: false });
+        
+        canvas.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            activeTouches.clear();
+            keys['ArrowLeft'] = false;
+            keys['ArrowRight'] = false;
+            shiftPressed = false;
+        }, { passive: false });
+    }
     
     // Handle visibility change to keep game running when tab is not active
     document.addEventListener('visibilitychange', () => {
