@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snake IO - Multiplayer</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <!-- Username Entry Screen -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-container">
+            <h1>🐍 Snake IO</h1>
+            <input type="text" id="usernameInput" placeholder="Enter your name" maxlength="15" autofocus>
+            <button id="joinButton">Join Game</button>
+            <p class="player-count">Players online: <span id="playerCount">0</span></p>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="game-screen hidden">
+        <canvas id="gameCanvas"></canvas>
+        <div id="leaderboard" class="leaderboard">
+            <h3>Leaderboard</h3>
+            <div id="leaderboardList"></div>
+        </div>
+        
+        <!-- Death Info Screen -->
+        <div id="deathScreen" class="death-screen hidden">
+            <div class="death-container">
+                <h2>You Died!</h2>
+                <p class="death-stats">Final Length: <span id="finalLength">0</span></p>
+                <p class="death-stats">Score: <span id="finalScore">0</span></p>
+                <p class="respawn-message">Respawning...</p>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

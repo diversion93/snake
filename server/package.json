@@ -1,0 +1,17 @@
+{
+  "name": "snake-io-server",
+  "version": "1.0.0",
+  "description": "Multiplayer Snake IO Game Server",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "keywords": ["snake", "multiplayer", "websocket"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1"
+  }
+}
