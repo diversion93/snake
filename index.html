@@ -20,6 +20,9 @@
             <input type="text" id="usernameInput" placeholder="Enter your name" maxlength="15" autofocus>
             <button id="joinButton">Join Game</button>
             <p class="player-count">Players online: <span id="playerCount">0</span></p>
+            <div class="admin-code-section">
+                <input type="password" id="adminCodeInput" placeholder="Admin code (optional)" maxlength="20">
+            </div>
         </div>
     </div>
 
@@ -38,6 +41,34 @@
                 <p class="death-stats">Final Length: <span id="finalLength">0</span></p>
                 <p class="death-stats">Score: <span id="finalScore">0</span></p>
                 <p class="respawn-message">Respawning...</p>
+            </div>
+        </div>
+        
+        <!-- Mobile Controls -->
+        <div id="mobileControls" class="mobile-controls hidden">
+            <div id="joystickContainer" class="joystick-container">
+                <div class="joystick-base">
+                    <div class="joystick-thumb"></div>
+                    <div class="sprint-indicator"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Admin Panel -->
+        <div id="adminPanel" class="admin-panel hidden">
+            <h4>Admin Controls</h4>
+            <button id="pauseGameBtn" class="admin-btn">⏸ Pause</button>
+            <button id="editPlayersBtn" class="admin-btn">✏️ Edit Players</button>
+        </div>
+        
+        <!-- Player Edit Modal -->
+        <div id="playerEditModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Edit Player Names</h3>
+                    <button id="closeModalBtn" class="close-btn">✕</button>
+                </div>
+                <div id="playerEditList" class="player-edit-list"></div>
             </div>
         </div>
     </div>

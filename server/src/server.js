@@ -15,7 +15,7 @@ const io = socketIo(server, {
 // Serve static files from parent directory
 app.use(express.static(path.join(__dirname, '../..')));
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 // Game state
 const players = new Map();
@@ -23,6 +23,9 @@ const preyItems = [];
 const MAX_PLAYERS = 20;
 const CANVAS_WIDTH = 1400;
 const CANVAS_HEIGHT = 800;
+const ADMIN_CODE = '19931993';
+let gamePaused = false;
+console.log('[SERVER INIT] gamePaused initialized to:', gamePaused);
 
 // Generate random color
 function randomColor() {
@@ -73,16 +76,23 @@ io.on('connection', (socket) => {
   console.log('New player connected:', socket.id);
   
   // Handle player join
-  socket.on('join', (username) => {
+  socket.on('join', (data) => {
     if (players.size >= MAX_PLAYERS) {
       socket.emit('error', 'Game is full');
       return;
     }
     
+    // Handle both old string format and new object format
+    const username = typeof data === 'string' ? data : (data.username || `Player${players.size + 1}`);
+    const adminCode = typeof data === 'object' ? data.adminCode : '';
+    
+    // Validate admin code
+    const isAdmin = adminCode === ADMIN_CODE;
+    
     const pos = randomPosition();
     const player = {
       id: socket.id,
-      username: username || `Player${players.size + 1}`,
+      username: username,
       x: pos.x,
       y: pos.y,
       angle: Math.random() * Math.PI * 2,
@@ -90,7 +100,8 @@ io.on('connection', (socket) => {
       score: 0,
       length: 5,
       body: [{ x: pos.x, y: pos.y }],
-      speed: 3
+      speed: 3,
+      isAdmin: isAdmin
     };
     
     players.set(socket.id, player);
@@ -105,10 +116,17 @@ io.on('connection', (socket) => {
       canvasHeight: CANVAS_HEIGHT
     });
     
+    // Send admin status and current game state
+    socket.emit('adminStatus', { isAdmin: isAdmin });
+    
+    // Send current pause state to new player
+    console.log(`[SERVER] Sending gamePaused state to ${socket.id}: ${gamePaused}`);
+    socket.emit('gamePaused', { paused: gamePaused });
+    
     // Notify other players
     socket.broadcast.emit('playerJoined', player);
     
-    console.log(`Player ${player.username} joined. Total players: ${players.size}`);
+    console.log(`Player ${player.username} joined${isAdmin ? ' (ADMIN)' : ''}. Total players: ${players.size}`);
   });
   
   // Handle player movement
@@ -209,6 +227,55 @@ io.on('connection', (socket) => {
     }
   });
   
+  // Handle resume request from any player
+  socket.on('requestResume', () => {
+    const player = players.get(socket.id);
+    if (!player) return;
+    
+    // Allow any player to resume the game when paused
+    if (gamePaused) {
+      console.log(`[SERVER] Resume requested by ${player.username}. Resuming game...`);
+      gamePaused = false;
+      io.emit('gamePaused', { paused: false });
+      console.log(`Game resumed by ${player.username}`);
+    }
+  });
+  
+  // Handle admin actions
+  socket.on('adminAction', (data) => {
+    const player = players.get(socket.id);
+    if (!player || !player.isAdmin) {
+      console.log(`Unauthorized admin action attempt from ${socket.id}`);
+      return;
+    }
+    
+    switch (data.type) {
+      case 'togglePause':
+        console.log(`[SERVER] togglePause called. Current state: ${gamePaused}, New state: ${!gamePaused}`);
+        gamePaused = !gamePaused;
+        console.log(`[SERVER] Broadcasting gamePaused state to all clients: ${gamePaused}`);
+        io.emit('gamePaused', { paused: gamePaused });
+        console.log(`Game ${gamePaused ? 'paused' : 'resumed'} by admin ${player.username}`);
+        break;
+        
+      case 'renamePlayer':
+        const targetPlayer = players.get(data.playerId);
+        if (targetPlayer && data.newName) {
+          const oldName = targetPlayer.username;
+          targetPlayer.username = data.newName.trim().substring(0, 15);
+          io.emit('playerRenamed', {
+            playerId: data.playerId,
+            newName: targetPlayer.username
+          });
+          console.log(`Admin ${player.username} renamed ${oldName} to ${targetPlayer.username}`);
+        }
+        break;
+        
+      default:
+        console.log(`Unknown admin action: ${data.type}`);
+    }
+  });
+  
   // Handle disconnect
   socket.on('disconnect', () => {
     const player = players.get(socket.id);
@@ -216,6 +283,12 @@ io.on('connection', (socket) => {
       console.log(`Player ${player.username} disconnected`);
       players.delete(socket.id);
       io.emit('playerLeft', socket.id);
+      
+      // Reset pause state if no players remain
+      if (players.size === 0 && gamePaused) {
+        console.log('[SERVER] All players disconnected, resetting gamePaused to false');
+        gamePaused = false;
+      }
       
       // Regenerate prey based on new player count
       if (players.size > 0) {

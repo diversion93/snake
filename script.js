@@ -11,12 +11,23 @@ let ctrlPressed = false; // Track Ctrl key for snake highlighting
 let shiftPressed = false; // Track Shift key for sprint
 let lastUpdateTime = Date.now();
 let gameActive = true;
+let isAdmin = false;
+let gamePaused = false;
+console.log('[CLIENT INIT] gamePaused initialized to:', gamePaused);
 
 // Mobile touch controls
 let touchStartX = 0;
 let touchStartY = 0;
 let touchActive = false;
 let isMobileDevice = false;
+let joystickActive = false;
+let joystickAngle = 0;
+let joystickMagnitude = 0;
+
+// Admin code validation
+const ADMIN_CODE = '19931993';
+const MAX_ADMIN_ATTEMPTS = 5;
+const ADMIN_ATTEMPT_COOLDOWN = 5 * 60 * 1000; // 5 minutes
 
 // Login screen
 document.addEventListener('DOMContentLoaded', () => {
@@ -64,15 +75,25 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function joinGame() {
         const username = usernameInput.value.trim() || 'Player';
+        const adminCode = document.getElementById('adminCodeInput').value.trim();
+        
         loginScreen.classList.add('hidden');
         gameScreen.classList.remove('hidden');
-        initGame(username);
+        initGame(username, adminCode);
     }
 });
 
-function initGame(username) {
+function initGame(username, adminCode = '') {
     // Connect to server
     socket = io();
+    
+    // Validate admin code locally before sending
+    if (adminCode) {
+        if (!validateAdminCodeAttempt(adminCode)) {
+            alert('Too many admin code attempts. Please wait before trying again.');
+            adminCode = '';
+        }
+    }
     
     // Socket event listeners
     socket.on('init', (data) => {
@@ -108,6 +129,8 @@ function initGame(username) {
         
         // Start game loop
         setupControls();
+        setupMobileJoystick();
+        setupAdminSocketListeners();
         gameLoop();
     });
     
@@ -209,12 +232,26 @@ function initGame(username) {
     });
     
     // Join the game
-    socket.emit('join', username);
+    socket.emit('join', { username, adminCode });
 }
 
 function setupControls() {
     // Keyboard controls
     document.addEventListener('keydown', (e) => {
+        // Handle ESC or Enter to resume game when paused
+        if (gamePaused && (e.key === 'Escape' || e.key === 'Enter')) {
+            console.log('[CLIENT] Resume key pressed:', e.key);
+            if (isAdmin) {
+                // Admin can toggle pause
+                socket.emit('adminAction', { type: 'togglePause' });
+            } else {
+                // Non-admin can request resume (server will handle permission check)
+                socket.emit('requestResume');
+            }
+            e.preventDefault();
+            return;
+        }
+        
         keys[e.key] = true;
         // Track Ctrl key (Control for macOS, Control/Ctrl for Windows/Linux)
         if (e.key === 'Control' || e.ctrlKey) {
@@ -565,7 +602,7 @@ class Snake {
     }
     
     draw(ctx, isMe = false) {
-        // Apply special highlighting when Ctrl is pressed and this is my snake
+        // Always highlight own snake (persistent), extra highlighting when Ctrl is pressed
         const isHighlighted = isMe && ctrlPressed;
         const isSprinting = isMe && this.isSprinting;
         
@@ -594,10 +631,21 @@ class Snake {
                     ctx.stroke();
                 }
             } else {
-                ctx.shadowBlur = isHighlighted ? 25 : (isMe ? 10 : 5);
+                // Always have some glow for own snake, extra when Ctrl is pressed
+                ctx.shadowBlur = isHighlighted ? 25 : (isMe ? 15 : 5);
             }
             
-            // Add extra visual emphasis when highlighted
+            // Persistent own-snake highlighting
+            if (isMe) {
+                // Draw persistent subtle outline for own snake
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(segment.x, segment.y, size + 2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            
+            // Add extra visual emphasis when Ctrl is pressed
             if (isHighlighted) {
                 // Draw outer glow ring
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
@@ -659,11 +707,16 @@ class Snake {
 function gameLoop() {
     // Calculate delta time for smooth animation
     const currentTime = Date.now();
-    const deltaTime = Math.min((currentTime - lastUpdateTime) / 16.67, 2); // Cap at 2x normal speed
-    lastUpdateTime = currentTime;
+    let deltaTime = 1; // Default delta time
     
-    // Update only if game is active or tab is visible
-    if (myPlayer && gameActive) {
+    // Only calculate and update deltaTime when game is active
+    if (gameActive && !gamePaused) {
+        deltaTime = Math.min((currentTime - lastUpdateTime) / 16.67, 2); // Cap at 2x normal speed
+        lastUpdateTime = currentTime;
+    }
+    
+    // Update only if game is active and not paused
+    if (myPlayer && gameActive && !gamePaused) {
         myPlayer.update(deltaTime);
     }
     
@@ -804,4 +857,381 @@ function updateLeaderboard() {
         entry.appendChild(scoreDiv);
         leaderboardList.appendChild(entry);
     });
+}
+
+// Admin code validation with session-based rate limiting
+function validateAdminCodeAttempt(code) {
+    const sessionAttempts = parseInt(sessionStorage.getItem('adminCodeAttempts') || '0');
+    const lastAttemptTime = parseInt(sessionStorage.getItem('lastAdminCodeAttempt') || '0');
+    const currentTime = Date.now();
+    
+    // Reset attempts if cooldown period has passed
+    if (currentTime - lastAttemptTime > ADMIN_ATTEMPT_COOLDOWN) {
+        sessionStorage.setItem('adminCodeAttempts', '0');
+        sessionStorage.setItem('lastAdminCodeAttempt', currentTime.toString());
+    }
+    
+    // Check if max attempts reached
+    if (sessionAttempts >= MAX_ADMIN_ATTEMPTS) {
+        const timePassed = currentTime - lastAttemptTime;
+        if (timePassed < ADMIN_ATTEMPT_COOLDOWN) {
+            return false;
+        }
+    }
+    
+    // Increment and store attempts
+    sessionStorage.setItem('adminCodeAttempts', (sessionAttempts + 1).toString());
+    sessionStorage.setItem('lastAdminCodeAttempt', currentTime.toString());
+    
+    return true;
+}
+
+// Setup mobile joystick controls
+function setupMobileJoystick() {
+    if (!isMobileDevice) return;
+    
+    const mobileControls = document.getElementById('mobileControls');
+    const joystickBase = document.querySelector('.joystick-base');
+    const joystickThumb = document.querySelector('.joystick-thumb');
+    
+    if (!mobileControls || !joystickBase || !joystickThumb) return;
+    
+    // Show mobile controls
+    mobileControls.classList.remove('hidden');
+    
+    let startX = 0;
+    let startY = 0;
+    const maxDistance = 35; // Maximum distance thumb can move from center
+    const sprintThreshold = 0.75; // Sprint when magnitude > 75%
+    
+    joystickBase.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const rect = joystickBase.getBoundingClientRect();
+        startX = rect.left + rect.width / 2;
+        startY = rect.top + rect.height / 2;
+        joystickActive = true;
+    }, { passive: false });
+    
+    joystickBase.addEventListener('touchmove', (e) => {
+        if (!joystickActive || !myPlayer) return;
+        e.preventDefault();
+        
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - startX;
+        const deltaY = touch.clientY - startY;
+        
+        // Calculate angle and magnitude
+        joystickAngle = Math.atan2(deltaY, deltaX);
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        joystickMagnitude = Math.min(distance / maxDistance, 1);
+        
+        // Update thumb position (clamped to maxDistance)
+        const clampedDistance = Math.min(distance, maxDistance);
+        const thumbX = Math.cos(joystickAngle) * clampedDistance;
+        const thumbY = Math.sin(joystickAngle) * clampedDistance;
+        
+        joystickThumb.style.transform = `translate(calc(-50% + ${thumbX}px), calc(-50% + ${thumbY}px))`;
+        
+        // Update snake angle directly
+        myPlayer.angle = joystickAngle;
+        
+        // Sprint detection based on magnitude
+        if (joystickMagnitude > sprintThreshold) {
+            shiftPressed = true;
+            joystickBase.classList.add('sprinting');
+        } else {
+            shiftPressed = false;
+            joystickBase.classList.remove('sprinting');
+        }
+    }, { passive: false });
+    
+    joystickBase.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        joystickActive = false;
+        shiftPressed = false;
+        joystickBase.classList.remove('sprinting');
+        
+        // Reset thumb position with smooth transition
+        joystickThumb.style.transition = 'transform 0.2s ease-out';
+        joystickThumb.style.transform = 'translate(-50%, -50%)';
+        
+        setTimeout(() => {
+            joystickThumb.style.transition = '';
+        }, 200);
+    }, { passive: false });
+    
+    joystickBase.addEventListener('touchcancel', (e) => {
+        e.preventDefault();
+        joystickActive = false;
+        shiftPressed = false;
+        joystickBase.classList.remove('sprinting');
+        joystickThumb.style.transform = 'translate(-50%, -50%)';
+    }, { passive: false });
+}
+
+// Setup admin panel and controls
+function setupAdminPanel() {
+    console.log('setupAdminPanel called');
+    const adminPanel = document.getElementById('adminPanel');
+    const pauseBtn = document.getElementById('pauseGameBtn');
+    const editPlayersBtn = document.getElementById('editPlayersBtn');
+    const playerEditModal = document.getElementById('playerEditModal');
+    const closeModalBtn = document.getElementById('closeModalBtn');
+    
+    console.log('Admin panel elements:', { adminPanel, pauseBtn, editPlayersBtn });
+    
+    if (!adminPanel) {
+        console.error('Admin panel not found!');
+        return;
+    }
+    
+    if (!pauseBtn) {
+        console.error('Pause button not found!');
+        return;
+    }
+    
+    // Show admin panel
+    adminPanel.classList.remove('hidden');
+    
+    // Pause/Resume game button
+    pauseBtn.addEventListener('click', () => {
+        console.log('Pause button clicked!');
+        // Don't toggle locally, wait for server response to avoid double-toggle
+        socket.emit('adminAction', { type: 'togglePause' });
+    });
+    
+    // Edit players button
+    editPlayersBtn.addEventListener('click', () => {
+        openPlayerEditModal();
+    });
+    
+    // Close modal button
+    if (closeModalBtn) {
+        closeModalBtn.addEventListener('click', () => {
+            playerEditModal.classList.add('hidden');
+        });
+    }
+}
+
+// Open player edit modal
+function openPlayerEditModal() {
+    const modal = document.getElementById('playerEditModal');
+    const playerEditList = document.getElementById('playerEditList');
+    
+    if (!modal || !playerEditList) return;
+    
+    // Clear existing list
+    playerEditList.innerHTML = '';
+    
+    // Collect all players
+    const allPlayers = [];
+    if (myPlayer) {
+        allPlayers.push({
+            id: myPlayer.id,
+            username: myPlayer.username,
+            color: myPlayer.color
+        });
+    }
+    players.forEach(p => {
+        allPlayers.push({
+            id: p.id,
+            username: p.username,
+            color: p.color
+        });
+    });
+    
+    // Create player edit items
+    allPlayers.forEach(player => {
+        const item = document.createElement('div');
+        item.className = 'player-edit-item';
+        
+        const playerInfo = document.createElement('div');
+        playerInfo.className = 'player-info';
+        
+        const colorIndicator = document.createElement('div');
+        colorIndicator.className = 'player-color-indicator';
+        colorIndicator.style.backgroundColor = player.color;
+        
+        const currentName = document.createElement('span');
+        currentName.className = 'current-name';
+        currentName.textContent = player.username;
+        
+        playerInfo.appendChild(colorIndicator);
+        playerInfo.appendChild(currentName);
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'New name';
+        input.maxLength = 15;
+        input.dataset.playerId = player.id;
+        
+        // Prevent keyboard events from propagating to game controls
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+        });
+        
+        input.addEventListener('keyup', (e) => {
+            e.stopPropagation();
+        });
+        
+        input.addEventListener('keypress', (e) => {
+            e.stopPropagation();
+            // Allow Enter to trigger rename
+            if (e.key === 'Enter') {
+                const newName = input.value.trim();
+                if (newName && newName !== player.username) {
+                    socket.emit('adminAction', {
+                        type: 'renamePlayer',
+                        playerId: player.id,
+                        newName: newName
+                    });
+                    currentName.textContent = newName;
+                    input.value = '';
+                }
+            }
+        });
+        
+        const button = document.createElement('button');
+        button.textContent = 'Rename';
+        button.addEventListener('click', () => {
+            const newName = input.value.trim();
+            if (newName && newName !== player.username) {
+                socket.emit('adminAction', {
+                    type: 'renamePlayer',
+                    playerId: player.id,
+                    newName: newName
+                });
+                currentName.textContent = newName;
+                input.value = '';
+            }
+        });
+        
+        item.appendChild(playerInfo);
+        item.appendChild(input);
+        item.appendChild(button);
+        
+        playerEditList.appendChild(item);
+    });
+    
+    // Show modal
+    modal.classList.remove('hidden');
+}
+
+// Add socket event listeners for admin functionality
+function setupAdminSocketListeners() {
+    socket.on('adminStatus', (data) => {
+        isAdmin = data.isAdmin;
+        if (isAdmin) {
+            setupAdminPanel();
+        }
+    });
+    
+    socket.on('gamePaused', (data) => {
+        console.log('[CLIENT] Received gamePaused event:', data.paused);
+        console.log('[CLIENT] Previous gamePaused state:', gamePaused);
+        console.trace('[CLIENT] gamePaused event call stack');
+        gamePaused = data.paused;
+        console.log('[CLIENT] New gamePaused state:', gamePaused);
+        
+        // Reset time when resuming to prevent delta time jumps
+        if (!gamePaused) {
+            console.log('[CLIENT] Game resumed, resetting lastUpdateTime');
+            lastUpdateTime = Date.now();
+        }
+        
+        // Update pause button UI if admin
+        if (isAdmin) {
+            console.log('[CLIENT] Updating pause button UI, isAdmin:', isAdmin);
+            const pauseBtn = document.getElementById('pauseGameBtn');
+            if (pauseBtn) {
+                if (gamePaused) {
+                    pauseBtn.classList.add('active');
+                    pauseBtn.textContent = '▶ Resume';
+                    console.log('[CLIENT] Pause button set to Resume');
+                } else {
+                    pauseBtn.classList.remove('active');
+                    pauseBtn.textContent = '⏸ Pause';
+                    console.log('[CLIENT] Pause button set to Pause');
+                }
+            }
+        }
+        
+        // Show pause overlay if needed
+        if (gamePaused) {
+            console.log('[CLIENT] Showing pause overlay');
+            showPauseOverlay();
+        } else {
+            console.log('[CLIENT] Hiding pause overlay');
+            hidePauseOverlay();
+        }
+    });
+
+    
+    socket.on('playerRenamed', (data) => {
+        // Update player name in local state
+        if (myPlayer && myPlayer.id === data.playerId) {
+            myPlayer.username = data.newName;
+        } else {
+            const player = players.get(data.playerId);
+            if (player) {
+                player.username = data.newName;
+            }
+        }
+        updateLeaderboard();
+    });
+}
+
+// Show pause overlay
+function showPauseOverlay() {
+    let overlay = document.getElementById('pauseOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'pauseOverlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1500;
+        `;
+        
+        const message = document.createElement('div');
+        message.style.cssText = `
+            color: white;
+            font-size: 3em;
+            font-weight: bold;
+            text-align: center;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+            margin-bottom: 20px;
+        `;
+        message.textContent = '⏸ GAME PAUSED';
+        
+        const instructions = document.createElement('div');
+        instructions.style.cssText = `
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.2em;
+            text-align: center;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        `;
+        instructions.innerHTML = 'Press <kbd style="background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; font-family: monospace;">ESC</kbd> or <kbd style="background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 5px; font-family: monospace;">ENTER</kbd> to resume';
+        
+        overlay.appendChild(message);
+        overlay.appendChild(instructions);
+        document.body.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+}
+
+// Hide pause overlay
+function hidePauseOverlay() {
+    const overlay = document.getElementById('pauseOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
 }
