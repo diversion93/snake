@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Add mobile control instructions
         const mobileHint = document.createElement('div');
         mobileHint.id = 'mobileHint';
-        mobileHint.innerHTML = 'Tap left/right to turn, hold both sides to sprint';
+        mobileHint.innerHTML = 'Use joystick to move, push far to sprint (needs length > 10)';
         mobileHint.style.cssText = 'position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: white; background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 10px; font-size: 14px; z-index: 1000; text-align: center;';
         document.body.appendChild(mobileHint);
         
@@ -431,8 +431,8 @@ class Snake {
                 if (this.sprintCooldown < 0) this.sprintCooldown = 0;
             }
             
-            // Check if can sprint: shift pressed, length > 5, and not in cooldown
-            const canSprint = shiftPressed && this.targetLength > 5 && this.sprintCooldown <= 0;
+            // Check if can sprint: shift pressed, length > 10 (safer threshold), and not in cooldown
+            const canSprint = shiftPressed && this.targetLength > 10 && this.sprintCooldown <= 0;
             
             if (canSprint && !this.isSprinting) {
                 // Start sprinting
@@ -444,9 +444,26 @@ class Snake {
                 // Update sprint timer
                 this.sprintTimer -= timeInSeconds;
                 
-                // Reduce length during sprint
-                this.targetLength -= this.lengthReductionRate * deltaTime;
-                this.targetLength = Math.max(5, this.targetLength);
+                // Dynamic length reduction: gentler for smaller snakes
+                const currentLength = this.body.length;
+                let lengthReduction = this.lengthReductionRate;
+                
+                // Reduce length reduction rate for smaller snakes
+                if (currentLength < 30) {
+                    lengthReduction = this.lengthReductionRate * 0.3; // 70% slower for small snakes
+                } else if (currentLength < 60) {
+                    lengthReduction = this.lengthReductionRate * 0.6; // 40% slower for medium snakes
+                }
+                
+                // Apply length reduction with safer minimum
+                this.targetLength -= lengthReduction * deltaTime;
+                this.targetLength = Math.max(10, this.targetLength); // Safer minimum of 10
+                
+                // Auto-stop sprint if getting too small
+                if (this.targetLength <= 12) {
+                    this.isSprinting = false;
+                    this.sprintCooldown = this.sprintCooldownDuration;
+                }
                 
                 // Check if sprint duration ended
                 if (this.sprintTimer <= 0) {
@@ -587,8 +604,10 @@ class Snake {
             }
         });
         
-        // Check collision with own body (self-collision after segment 5)
-        for (let i = 5; i < this.body.length; i++) {
+        // Check collision with own body (self-collision after segment 20)
+        // Increased from 5 to 20 to prevent false collisions when using joystick
+        // and quickly changing direction (especially 180-degree turns)
+        for (let i = 20; i < this.body.length; i++) {
             const segment = this.body[i];
             const dx = this.x - segment.x;
             const dy = this.y - segment.y;
