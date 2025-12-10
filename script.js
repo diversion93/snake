@@ -45,17 +45,33 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
     
-    // Adjust canvas size for mobile
+    // Set initial canvas size
+    resizeCanvas();
+    
+    // Add resize and orientation change listeners
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('orientationchange', () => {
+        setTimeout(resizeCanvas, 100); // Delay to ensure proper dimensions
+    });
+    
+    // Setup fullscreen for mobile devices
     if (isMobileDevice) {
-        const maxWidth = Math.min(window.innerWidth - 40, 800);
-        const maxHeight = Math.min(window.innerHeight - 200, 600);
-        canvasWidth = maxWidth;
-        canvasHeight = maxHeight;
+        setupMobileFullscreen();
+    }
+    
+    // Join game button
+    joinButton.addEventListener('click', joinGame);
+    usernameInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') joinGame();
+    });
+    
+    // Show mobile hint after joining
+    function showMobileHint() {
+        if (!isMobileDevice) return;
         
-        // Add mobile control instructions
         const mobileHint = document.createElement('div');
         mobileHint.id = 'mobileHint';
-        mobileHint.innerHTML = 'Use joystick to move, push far to sprint (needs length > 10)';
+        mobileHint.innerHTML = 'Use joystick to move, push far to sprint (needs length > 10)<br>Tap 🔲 for fullscreen';
         mobileHint.style.cssText = 'position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: white; background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 10px; font-size: 14px; z-index: 1000; text-align: center;';
         document.body.appendChild(mobileHint);
         
@@ -67,12 +83,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 5000);
     }
     
-    // Join game button
-    joinButton.addEventListener('click', joinGame);
-    usernameInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') joinGame();
-    });
-    
     function joinGame() {
         const username = usernameInput.value.trim() || 'Player';
         const adminCode = document.getElementById('adminCodeInput').value.trim();
@@ -80,8 +90,143 @@ document.addEventListener('DOMContentLoaded', () => {
         loginScreen.classList.add('hidden');
         gameScreen.classList.remove('hidden');
         initGame(username, adminCode);
+        
+        // Show mobile hint after game screen is visible
+        setTimeout(showMobileHint, 500);
     }
 });
+
+// Resize canvas to fit screen optimally
+function resizeCanvas() {
+    if (!canvas) return;
+    
+    const isLandscape = window.innerWidth > window.innerHeight;
+    const aspectRatio = 16 / 9; // Desired aspect ratio for landscape
+    
+    if (isMobileDevice) {
+        // Mobile device - maximize screen usage
+        if (isLandscape) {
+            // Landscape mode - use almost full screen
+            canvasWidth = Math.min(window.innerWidth - 20, 1400);
+            canvasHeight = Math.min(window.innerHeight - 20, 800);
+        } else {
+            // Portrait mode - maximize height usage
+            canvasWidth = window.innerWidth - 20;
+            // Use much more of the screen height in portrait mode
+            canvasHeight = Math.min(window.innerHeight - 80, window.innerWidth * 1.5);
+        }
+    } else {
+        // Desktop - use standard sizes
+        canvasWidth = Math.min(window.innerWidth - 40, 1400);
+        canvasHeight = Math.min(window.innerHeight - 40, 800);
+    }
+    
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    
+    console.log(`Canvas resized: ${canvasWidth}x${canvasHeight}, orientation: ${isLandscape ? 'landscape' : 'portrait'}`);
+}
+
+// Setup mobile fullscreen functionality
+function setupMobileFullscreen() {
+    // Create fullscreen button
+    const fullscreenBtn = document.createElement('button');
+    fullscreenBtn.id = 'fullscreenBtn';
+    fullscreenBtn.innerHTML = '🔲';
+    fullscreenBtn.style.cssText = `
+        position: fixed;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.6);
+        color: white;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-size: 20px;
+        cursor: pointer;
+        z-index: 1100;
+        backdrop-filter: blur(5px);
+        transition: all 0.2s;
+    `;
+    
+    document.body.appendChild(fullscreenBtn);
+    
+    fullscreenBtn.addEventListener('click', toggleFullscreen);
+    
+    // Listen for fullscreen changes
+    document.addEventListener('fullscreenchange', updateFullscreenButton);
+    document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
+    document.addEventListener('mozfullscreenchange', updateFullscreenButton);
+    document.addEventListener('MSFullscreenChange', updateFullscreenButton);
+    
+    function updateFullscreenButton() {
+        const isFullscreen = !!(document.fullscreenElement || 
+                                document.webkitFullscreenElement || 
+                                document.mozFullScreenElement || 
+                                document.msFullscreenElement);
+        
+        if (isFullscreen) {
+            fullscreenBtn.innerHTML = '✕';
+            fullscreenBtn.style.background = 'rgba(255, 100, 100, 0.6)';
+        } else {
+            fullscreenBtn.innerHTML = '🔲';
+            fullscreenBtn.style.background = 'rgba(0, 0, 0, 0.6)';
+        }
+        
+        // Resize canvas after fullscreen change
+        setTimeout(resizeCanvas, 100);
+    }
+}
+
+// Toggle fullscreen mode
+function toggleFullscreen() {
+    const elem = document.documentElement;
+    
+    if (!document.fullscreenElement && 
+        !document.webkitFullscreenElement && 
+        !document.mozFullScreenElement && 
+        !document.msFullscreenElement) {
+        // Enter fullscreen
+        if (elem.requestFullscreen) {
+            elem.requestFullscreen();
+        } else if (elem.webkitRequestFullscreen) {
+            elem.webkitRequestFullscreen();
+        } else if (elem.mozRequestFullScreen) {
+            elem.mozRequestFullScreen();
+        } else if (elem.msRequestFullscreen) {
+            elem.msRequestFullscreen();
+        }
+        
+        // Try to lock orientation to landscape on mobile
+        if (screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('landscape').catch(err => {
+                console.log('Orientation lock not supported:', err);
+            });
+        }
+        
+        // Hide address bar on mobile browsers
+        setTimeout(() => {
+            window.scrollTo(0, 1);
+        }, 100);
+    } else {
+        // Exit fullscreen
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+            document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+        }
+        
+        // Unlock orientation
+        if (screen.orientation && screen.orientation.unlock) {
+            screen.orientation.unlock();
+        }
+    }
+}
 
 function initGame(username, adminCode = '') {
     // Connect to server
